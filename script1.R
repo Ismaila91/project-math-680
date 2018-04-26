@@ -19,5 +19,8 @@ mat = matrix(rnorm(16), 4, 4)
 
 summarize.some.cols(mat, 1:2)
 
-summarize.some.cols(mat, 2:4)
+## Bienvenue en mode Git sur RStudio
+somme.deux.entiers = function(a,b){
+  return(a+b)
+}
 
