@@ -24,3 +24,7 @@ somme.deux.entiers = function(a,b){
   return(a+b)
 }
 
+produit.deux.entiers = function(a,b){
+  return(a*b)
+}
+
