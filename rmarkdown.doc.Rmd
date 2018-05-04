@@ -1,0 +1,174 @@
+---
+title: "Fused lasso regression on the cookie data set"
+author: "Ismaila Ba"
+date: "27 avril 2018"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+\section{Introduction}
+
+In this project, we are interested in proposing a regression model which fit better the cookie data set. The main objective is to know the percentage of sugars in uncooked biscuits. Classical methods of analytical chemistry make it possible to measure the composition of biscuits but they are rather long and expensive. As an alternative, it would be desirable to be able to replace them by measuring an absorbance spectrum in the near-infrared range. In the training dataset, we have 40 uncooked biscuits for which the near-infrared spectra are measured: the absordance is measured at a given wavelength, for all wavelengths between 1100 and 2498 nanometers and regularly spaced 2 nanometers apart. We therefore have 700 potentially explanatory variables for 40 individuals. Since the number of features is much larger than the number of individuals, we propose three penalized regressions. These models are the lasso, the adaptive lasso and the fused lasso regressions. The glmnet package will be used to deal with the Lasso and the adaptive Lasso. The main purpose in model fitting of this project is to investigate the fused lasso regression using the alternating direction method of multipliers (admm) in estimating the coefficients. Its use makes sense since in the cookie dataset the features are ordered in some meaningful ways.
+
+The validation sample which comprises 32 individuals will be used to compare the three proposed models. The comparison will be in term of prediction error.    
+
+
+\section{2. Models fitting}
+
+\subsection{2.1 The Lasso regression}
+\subsubsection{2.1.1 Definition} The lasso regression consists in solving the following optimization problem:
+
+$$\underset{\beta}{min} \, \left\lbrace \, \frac{1}{2n} \mid \mid \boldsymbol{y}-\beta_{0}\boldsymbol{1} - \boldsymbol{X}\boldsymbol{\beta} \mid \mid^2_2 +\lambda \mid \mid \boldsymbol{\beta} \mid \mid_1 \right\rbrace, \quad (\lambda>0)$$
+where $\boldsymbol{y}=(y_1,\cdots,y_n)$ denote the n-vector of responses, $\boldsymbol{X}$ be an $n\times p$ matrix with $\boldsymbol{x_i} \in \mathbb{R}^p$ in its ith row, $\boldsymbol{1}$ is the n ones, and $\mid \mid . \mid \mid_1$ is the $l_1$-norm and $\mid \mid . \mid \mid_2$ is the usual Euclidean norm.
+
+\subsubsection{2.1.2 Implementation of the Lasso regression in R using glmnet package}
+
+```{r}
+## Loading the cookie data set
+load("C:/Users/User/Documents/Ismaila/Cours Computation Intensive Statistics/cookie.RData")
+## Training set
+train.set = cookie.app
+## Validation set
+test.set = cookie.val
+## Lasso regression using the glmnet package
+library(glmnet)
+m.lasso = cv.glmnet(x=as.matrix(train.set[,-1]), y=train.set$sucres)
+plot(m.lasso)
+coef.lasso = coef(m.lasso, s="lambda.min")
+predict.sucres.lasso = predict(m.lasso, newx=as.matrix(test.set[,-1]), s="lambda.min")
+## prediction error in case of lasso regression
+pred.error.lasso = mean((test.set$sucres-predict.sucres.lasso)^2)
+pred.error.lasso
+```
+
+\subsection{2.2 The Adaptive Lasso regression}
+
+\subsubsection{2.2.1 Definition} It consists of solving the following optimization problem:
+$$\underset{\beta}{min} \, \left\lbrace \, \frac{1}{2n} \mid \mid \boldsymbol{y}-\beta_{0}\boldsymbol{1} - \boldsymbol{X}\boldsymbol{\beta} \mid \mid^2_2 +\lambda_n \sum_{j=1}^p \omega_j \mid \beta_j \mid \right\rbrace$$ where $\boldsymbol{\omega}=(\omega_1,\cdots,\omega_n)$ is a weight vector and $\lambda>0$
+
+In this project, we will consider the weight vector proposed in (**Zou 2006**). It means $\hat{\omega_j}=\frac{1}{\mid \hat{\beta_j}\mid^\gamma}$ for some $\gamma>0$ and a $\sqrt n$-consistent estimator $\hat{\beta_j}$ of $\beta_j$. In the present study, $\hat{\beta_j}$ will be obtained using ridge regression on the cookie data set and $\gamma$ will be fixed at $.5$
+
+\subsubsection{2.1.2 Implementation of the Adaptive lasso regression in R}
+
+```{r}
+## Adaptative lasso regression 
+m.ridge = cv.glmnet(x=as.matrix(train.set[,-1]), y=train.set$sucres, alpha=0)
+v.weights = 1/abs(as.matrix(coef(m.ridge, s="lambda.min"))[,1][2:ncol(train.set)])^.5
+m.adalasso = cv.glmnet(x=as.matrix(train.set[,-1]), y=train.set$sucres, penalty.factor=v.weights)
+plot(m.adalasso)
+coef.adalasso = coef(m.adalasso, s="lambda.min")
+predict.sucres.adalasso = predict(m.adalasso, newx=as.matrix(test.set[,-1]), s="lambda.min")
+## prediction error in case of adaptive lasso regression
+pred.error.adalasso = mean((test.set$sucres-predict.sucres.adalasso)^2)
+pred.error.adalasso
+```
+
+
+\subsection{2.3 The Fused Lasso regression}
+\subsubsection{2.3.1 Definition} The fused lasso estimator is defined by:
+$$\hat{\beta}=argmin \left\lbrace \sum_i(y_i - \sum_j \beta_j x_{ij})^2 \right\rbrace \quad \text{subject to} \quad \sum_{j=1}^p \mid \beta_j \mid \leq s_1 \quad \sum_{j=2}^p \mid \beta_j - \beta_{j-1}\mid \leq s_2,$$
+
+or equivalently,
+$$\hat{\beta}=argmin \left\lbrace \sum_i (y_i-\sum_j \beta_j x_{ij})^2 + \lambda_1 \sum_{j=1}^p \mid \beta_j \mid + \lambda_2 \sum_{j=2}^p \mid \beta_j - \beta_{j-1} \mid \right\rbrace$$ where $s_1$, $s_2$, $\lambda_1$ and $\lambda_2$ are user-defined tuning parameters and control the amount of shrinkage. 
+
+The first constraint encourages sparsity in the coefficents; the second encourages sparsity in their differencies, i.e flatness of the coefficient profiles $\beta_j$ as a function of $j$.
+
+\subsubsection{2.3.2 Implementation of the Fused lasso regression in R}
+The fused lasso regression is a convex optimization problems where the cost function is the sum of two terms. The first term is separable in the variable blocks and the second term is separable in the difference between consecutive variable blocks. One efficient way of minimizing this kind of optimization problems is to use an Alterning Direction Method of Multipliers (ADMM) Algorithm. Therefore I will consider the ADMM algorithm to estimate the coefficients of the fused lasso regression considered for the cookie data.
+
++  ADMM Algorithm for fused lasso regression
+
+We can rewrite the fused lasso regression problem as
+
+$$\underset{\beta \in \mathbb{R}^p}{min} \frac{1}{2} \mid \mid \boldsymbol{y}-\boldsymbol{X} \beta \mid \mid^2_2 + \lambda \mid \mid D\beta \mid \mid_1$$ where $D \in \mathbb{R}^{m\times p}$ is a difference operator. If $D=I$, we have the lasso regression.
+
+This can be written as
+$$\underset{\beta \in \mathbb{R}^p, \alpha \in \mathbb{R}^m}{min} \frac{1}{2} \mid \mid \boldsymbol{y}-\boldsymbol{X} \beta \mid \mid^2_2 + \lambda \mid \mid \alpha \mid \mid_1 \quad \text{subject to} \quad D\beta-\alpha=0$$ and ADMM algorithm (the main steps) for this problem is:
+$$\beta^{(k)} = (\boldsymbol{X}^T\boldsymbol{X}+\rho D^TD)^{-1}(\boldsymbol{X}^T\boldsymbol{y}+\rho D^T(\alpha^{(k-1)}-w^{(k-1)})) $$
+$$\alpha^{(k)} = S_{\lambda/\rho}(D\beta^{(k)}+w^{(k-1)}) $$
+$$ w^{(k)} = w^{(k-1)} + D\beta^{(k)} - \alpha^{(k)}$$
+
+where $\rho>0$ is a positive penalty parameter and $S_t$ is the soft-thresholding operator, defined as 
+
+\begin{equation*}
+\left[ S_t(x) \right]_j=\left\lbrace
+\begin{array}{ccc}
+x_j - t & x_j > t \\
+0 & -t \leq x_j \leq t, \quad j=1,\cdots,p \\
+x_j + t & x_j < -t
+\end{array}\right.
+\end{equation*}
+
++ Implementation of the ADMM fused lasso regression in R
+
+I made some choices on $\lambda$, $\rho$ and $D$ in implementing the algorithm. I set $\rho$ to be the maximum eigenvalue of $\boldsymbol{X}^T\boldsymbol{X}$ shrinked by $.01$, and I fix $\lambda$ to be the minimal value of $\lambda$ in the lasso regression with the glmnet package. Finally in the fused lasso constraints, I set $\lambda_1=0$; the remaining constraint can be written as $\mid \mid D \beta \mid \mid_1$ where 
+$$D=\begin{pmatrix}
+-1 & 1 & 0 & \cdots & 0 \\
+0 & -1 & 1 & \cdots & \vdots \\
+\vdots & \cdots & -1 & 1 & 0 \\
+0 & \cdots & \cdots & -1 & 1
+\end{pmatrix}
+$$
+
+At $50$ iterations, the algorithm converges with the choice made on $\rho$, $\lambda$ and $D$.
+
+
+```{r}
+## Soft-threshold operator of a vector x and a threshold tresh
+soft.op = function(x, thresh){
+  soft.thresh= numeric(length(x))
+  soft.thresh[which(x>thresh)] = x[which(x>thresh)] - thresh
+  soft.thresh[which(x < -thresh)] = x[which(x < -thresh)] + thresh
+  return(soft.thresh)
+}
+
+## ADMM algorithm for fused lasso
+m = 50 ## the number of iterations
+ l=m.lasso$lambda.min ## lambda 
+X = as.matrix(train.set[,-1]) ## the design matrix
+r = .01*max(eigen(crossprod(X))$values) ## rho
+y = train.set$sucres ## the response variable
+## The difference operator D. I only encourage sparsity in the difference
+## of the coefficients, i.e i set lambda1=0
+D = matrix(0, ncol(X)-1, ncol(X))
+d = nrow(D)           
+for (i in 1:d) {
+  ifelse(i==1, D[i,c(1,2)]<-c(-1,1), ifelse(i==d, D[i,c(d-1,d)]<-c(-1,1),
+                                           D[i,c(i-1,i+1)]<-c(-1,1)))
+}
+
+beta = as.matrix(rep(1,ncol(X))) ## Initialization of beta
+w = as.matrix(numeric(length = d)) ## Initialization of w
+alpha = as.matrix(rep(1,d)) ## initialization of alpha
+for (k in 1:m) {
+  beta = qr.solve(crossprod(X)+r*crossprod(D))%*%(t(X)%*%y+r*t(D)%*%(alpha-w))
+  alpha = as.matrix(soft.op(drop(D%*%beta+w),l/r))
+  w = w + D%*%beta - alpha
+}
+## Prediction and prediction error
+pred.fused.lasso = as.matrix(test.set[,-1])%*%beta
+pred.error.fusedlasso = mean((test.set$sucres-pred.fused.lasso)^2)
+pred.error.fusedlasso
+```
+
+
+\section{Conclusion}
+The three proposed models have different prediction errors. The adaptive lasso seems to fit better the cookie data set than the two remaining models, the lasso and the fused lasso. The choices made when implementing the ADMM algorithm for the fused lasso may be affect its results. The convergence is attained at 50 iterations, which is small. The main challenge in the proposed admm algorithm was to find an explicit expression of $D$ and $\rho$.  
+
+\section{References}
+
+ Friedmann, J., Hastie, T., Simon, N., & Tibshirani, R. (2016). Lasso and Elastic-Net Regularized Generalized Linear Models. R-package version 2.0-5. 2016.
+
+ Zou, H. (2006). The adaptive lasso and its oracle properties. Journal of the American statistical association, 101(476), 1418-1429.
+
+Lecture Notes, MATH 680 Computation Intensive Statisitcs, Yi Yang, McGill University
+
+Lecture Notes, Dual Methods and ADMM, Ryan Tibshirani, Convex Optimiization
